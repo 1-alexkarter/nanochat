@@ -230,24 +230,30 @@ def _mp_train_fn(index: int):
 
     # Calculate number of iterations
     assert num_iterations > 0 or target_param_data_ratio > 0 or target_flops > 0
+
     if num_iterations > 0:
-        print0(f"Using user-provided number of iterations: {num_iterations:,}")
+        num_iters = num_iterations
+        print0(f"Using user-provided number of iterations: {num_iters:,}")
     elif target_flops > 0:
-        num_iterations = round(target_flops / (num_flops_per_token * total_batch_size))
-        print0(f"Calculated number of iterations from target FLOPs: {num_iterations:,}")
+        # calculate the number of iterations from the target flops
+        num_iters = round(target_flops / (num_flops_per_token * total_batch_size))
+        print0(f"Calculated number of iterations from target FLOPs: {num_iters:,}")
     elif target_param_data_ratio > 0:
+        # calculate the number of iterations from the target param data ratio
         target_tokens = target_param_data_ratio * num_params
-        num_iterations = target_tokens // total_batch_size
+        num_iters = target_tokens // total_batch_size
         print0(
-            f"Calculated number of iterations from target data:param ratio: {num_iterations:,}"
+            f"Calculated number of iterations from target data:param ratio: {num_iters:,}"
         )
     else:
         raise ValueError("No training horizon specified")
-    total_tokens = total_batch_size * num_iterations
+
+    # keep the global in sync for logging / report at the end
+    num_iterations = num_iters
+
+    total_tokens = total_batch_size * num_iters
     print0(f"Total number of training tokens: {total_tokens:,}")
-    print0(
-        f"Tokens : Params ratio: {total_batch_size * num_iterations / num_params:.2f}"
-    )
+    print0(f"Tokens : Params ratio: {total_tokens / num_params:.2f}")  # Chinchilla ~20
     print0(f"Total training FLOPs estimate: {num_flops_per_token * total_tokens:e}")
 
     # -----------------------------------------------------------------------------
