@@ -1,6 +1,7 @@
 """
 Utilities for saving and loading model/optim/state checkpoints.
 """
+
 import os
 import re
 import glob
@@ -13,15 +14,28 @@ from nanochat.gpt import GPT, GPTConfig
 from nanochat.tokenizer import get_tokenizer
 from nanochat.common import setup_default_logging
 
+
 # Set up logging
 setup_default_logging()
 logger = logging.getLogger(__name__)
+
+
 def log0(message):
-    if int(os.environ.get('RANK', 0)) == 0:
+    if int(os.environ.get("RANK", 0)) == 0:
         logger.info(message)
 
+
+def _xla_to_cpu_map_location(storage, location):
+    # map all XLA storages to CPU when loading a checkpoint
+    if isinstance(location, str) and location.startswith("xla"):
+        return torch.device("cpu")
+    if isinstance(location, torch.device) and location.type == "xla":
+        return torch.device("cpu")
+    return location
+
+
 def save_checkpoint(checkpoint_dir, step, model_data, optimizer_data, meta_data):
-    assert int(os.environ.get('RANK', 0)) == 0 # prevent footguns for now
+    assert int(os.environ.get("RANK", 0)) == 0  # prevent footguns for now
     os.makedirs(checkpoint_dir, exist_ok=True)
     # Save the model state (parameters)
     model_path = os.path.join(checkpoint_dir, f"model_{step:06d}.pt")
@@ -40,11 +54,21 @@ def save_checkpoint(checkpoint_dir, step, model_data, optimizer_data, meta_data)
 
 
 def load_checkpoint(checkpoint_dir, step, device, load_optimizer=False):
-    # Load the model state
+
     model_path = os.path.join(checkpoint_dir, f"model_{step:06d}.pt")
-    model_data = torch.load(model_path, map_location=device)
+    dev_str = str(device)
+    if "xla" in dev_str:
+        # Checkpoint was written from XLA. Load tensors onto CPU first,
+        # we will move them into an XLA model later.
+        map_location = _xla_to_cpu_map_location
+    else:
+        map_location = device
+
+    # Load the model state
+    model_data = torch.load(model_path, map_location=map_location)
     # Load the optimizer state if requested
     optimizer_data = None
+
     if load_optimizer:
         optimizer_path = os.path.join(checkpoint_dir, f"optim_{step:06d}.pt")
         optimizer_data = torch.load(optimizer_path, map_location=device)
@@ -64,7 +88,9 @@ def build_model(checkpoint_dir, step, device, phase):
     - meta data saved during base model training
     """
     assert phase in ["train", "eval"], f"Invalid phase: {phase}"
-    model_data, optimizer_data, meta_data = load_checkpoint(checkpoint_dir, step, device, load_optimizer=False)
+    model_data, optimizer_data, meta_data = load_checkpoint(
+        checkpoint_dir, step, device, load_optimizer=False
+    )
     if device.type in {"cpu", "mps"}:
         # Convert bfloat16 tensors to float for CPU inference
         model_data = {
@@ -80,7 +106,7 @@ def build_model(checkpoint_dir, step, device, phase):
         model = GPT(model_config)
     # Load the model state
     model.to_empty(device=device)
-    model.init_weights() # note: this is dumb, but we need to init the rotary embeddings. TODO: fix model re-init
+    model.init_weights()  # note: this is dumb, but we need to init the rotary embeddings. TODO: fix model re-init
     model.load_state_dict(model_data, strict=True, assign=True)
     # Put the model in the right training phase / mode
     if phase == "eval":
@@ -96,7 +122,11 @@ def build_model(checkpoint_dir, step, device, phase):
 
 def find_largest_model(checkpoint_dir):
     # attempt to guess the model tag: take the biggest model available
-    model_tags = [f for f in os.listdir(checkpoint_dir) if os.path.isdir(os.path.join(checkpoint_dir, f))]
+    model_tags = [
+        f
+        for f in os.listdir(checkpoint_dir)
+        if os.path.isdir(os.path.join(checkpoint_dir, f))
+    ]
     if not model_tags:
         raise FileNotFoundError(f"No checkpoints found in {checkpoint_dir}")
     # 1) normally all model tags are of the form d<number>, try that first:
@@ -110,7 +140,9 @@ def find_largest_model(checkpoint_dir):
         candidates.sort(key=lambda x: x[0], reverse=True)
         return candidates[0][1]
     # 2) if that failed, take the most recently updated model:
-    model_tags.sort(key=lambda x: os.path.getmtime(os.path.join(checkpoint_dir, x)), reverse=True)
+    model_tags.sort(
+        key=lambda x: os.path.getmtime(os.path.join(checkpoint_dir, x)), reverse=True
+    )
     return model_tags[0]
 
 
@@ -119,11 +151,15 @@ def find_last_step(checkpoint_dir):
     checkpoint_files = glob.glob(os.path.join(checkpoint_dir, "model_*.pt"))
     if not checkpoint_files:
         raise FileNotFoundError(f"No checkpoints found in {checkpoint_dir}")
-    last_step = int(max(os.path.basename(f).split("_")[-1].split(".")[0] for f in checkpoint_files))
+    last_step = int(
+        max(os.path.basename(f).split("_")[-1].split(".")[0] for f in checkpoint_files)
+    )
     return last_step
+
 
 # -----------------------------------------------------------------------------
 # convenience functions that take into account nanochat's directory structure
+
 
 def load_model_from_dir(checkpoints_dir, device, phase, model_tag=None, step=None):
     if model_tag is None:
@@ -139,6 +175,7 @@ def load_model_from_dir(checkpoints_dir, device, phase, model_tag=None, step=Non
     log0(f"Loading model from {checkpoint_dir} with step {step}")
     model, tokenizer, meta_data = build_model(checkpoint_dir, step, device, phase)
     return model, tokenizer, meta_data
+
 
 def load_model(source, *args, **kwargs):
     model_dir = {
