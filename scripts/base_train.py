@@ -255,6 +255,15 @@ optimizers = model.setup_optimizers(
     weight_decay=weight_decay,
 )
 adamw_optimizer, muon_optimizer = optimizers
+# Disable fused optimizers on XLA (they are only supported on cuda/mps/cpu/etc.)
+if device_type == "xla":
+    from nanochat.common import print0
+
+    print0("device_type=xla: disabling fused optimizers (not supported on XLA)")
+    for opt in optimizers:
+        for group in opt.param_groups:
+            if "fused" in group and group["fused"]:
+                group["fused"] = False
 
 # Initialize the DataLoaders for train/val
 base_dir = get_base_dir()
