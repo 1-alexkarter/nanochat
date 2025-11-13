@@ -515,15 +515,23 @@ def _mp_train_fn(index: int):
 
 
 if __name__ == "__main__":
-    # device_type may have been overridden from CLI via configurator
-    device_type = autodetect_device_type() if device_type == "" else device_type
+    if os.environ.get("PJRT_DEVICE", "").upper() == "TPU":
+        import torch_xla.distributed.xla_multiprocessing as xmp
 
-    if device_type == "xla" and xmp is not None:
-        # Use all 8 TPU cores on v6e-8
-        xmp.spawn(_mp_train_fn, args=(), nprocs=8)
+        # nprocs=None (or omitted) => "use all TPU devices"
+        xmp.spawn(_mp_train_fn, args=())  # <-- no nprocs=8 here
     else:
-        # Normal (single-process or torchrun-DDP) path
-        _mp_train_fn(index=0)
+        _mp_train_fn(0)
+
+    # # device_type may have been overridden from CLI via configurator
+    # device_type = autodetect_device_type() if device_type == "" else device_type
+
+    # if device_type == "xla" and xmp is not None:
+    #     # Use all 8 TPU cores on v6e-8
+    #     xmp.spawn(_mp_train_fn, args=(), nprocs=8)
+    # else:
+    #     # Normal (single-process or torchrun-DDP) path
+    #     _mp_train_fn(index=0)
 
 # OLD VERSION
 # # Compute init
