@@ -112,7 +112,7 @@ def _mp_train_fn(index: int):
     index: process index when launched via xmp.spawn.
            For non-XLA runs we just pass 0.
     """
-    global device_type  # we let configurator override this at module level
+    global device_type, num_iterations  # we let configurator override this at module level
 
     # Decide device_type once more, honoring CLI overrides
     device_type = autodetect_device_type() if device_type == "" else device_type
