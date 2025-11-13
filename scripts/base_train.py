@@ -121,10 +121,10 @@ def _mp_train_fn(index: int):
         # Multi-process XLA: each process gets its own TPU core.
         assert xm is not None, "torch_xla is required for device_type='xla'"
         # World size and rank come from XLA's view of the mesh
-        ddp = True
-        ddp_world_size = xm.xrt_world_size()
-        ddp_rank = xm.get_ordinal()  # global ordinal [0..world_size-1]
-        ddp_local_rank = ddp_rank  # single host, so local_rank == rank
+        ddp = False
+        ddp_rank = 0
+        ddp_local_rank = 0
+        ddp_world_size = 1
         device = xm.xla_device()
 
         # Make the rest of nanochat (print0, dataloader, etc.) happy:
