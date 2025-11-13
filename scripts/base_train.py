@@ -103,18 +103,25 @@ user_config = {k: globals()[k] for k in config_keys}  # will be useful for loggi
 # Compute init
 device_type = autodetect_device_type() if device_type == "" else device_type
 if device_type == "xla":
-    # Single-process TPU/XLA run (no DDP)
     assert (
         xm is not None
     ), "torch_xla is not installed, but device_type='xla' was requested"
-    ddp = False
-    ddp_rank = 0
-    ddp_local_rank = 0
-    ddp_world_size = 1
+
+    # Under xla_spawn, this gives you the global world size and rank.
+    ddp_world_size = xm.xrt_world_size()
+    ddp_rank = xm.get_ordinal()
+    ddp_local_rank = int(os.environ.get("LOCAL_RANK", ddp_rank))
+    ddp = ddp_world_size > 1
+
+    # Make sure any code that uses RANK/WORLD_SIZE (e.g. dataloader sharding) sees correct values.
+    os.environ["RANK"] = str(ddp_rank)
+    os.environ["WORLD_SIZE"] = str(ddp_world_size)
+
     device = xm.xla_device()
 else:
     # Original path: CUDA/MPS/CPU, handled by nanochat.common.compute_init
     ddp, ddp_rank, ddp_local_rank, ddp_world_size, device = compute_init(device_type)
+
 
 master_process = ddp_rank == 0  # this process will do logging, checkpointing etc.
 
