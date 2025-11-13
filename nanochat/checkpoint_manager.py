@@ -53,9 +53,37 @@ def save_checkpoint(checkpoint_dir, step, model_data, optimizer_data, meta_data)
     log0(f"Saved metadata file to: {meta_path}")
 
 
-def load_checkpoint(checkpoint_dir, step, device, load_optimizer=False):
+# def load_checkpoint(checkpoint_dir, step, device, load_optimizer=False):
 
+#     model_path = os.path.join(checkpoint_dir, f"model_{step:06d}.pt")
+#     dev_str = str(device)
+#     if "xla" in dev_str:
+#         # Checkpoint was written from XLA. Load tensors onto CPU first,
+#         # we will move them into an XLA model later.
+#         map_location = _xla_to_cpu_map_location
+#     else:
+#         map_location = device
+
+#     # Load the model state
+#     model_data = torch.load(model_path, map_location=map_location)
+#     # Load the optimizer state if requested
+#     optimizer_data = None
+
+#     if load_optimizer:
+#         optimizer_path = os.path.join(checkpoint_dir, f"optim_{step:06d}.pt")
+#         optimizer_data = torch.load(optimizer_path, map_location=device)
+#     # Load the metadata
+#     meta_path = os.path.join(checkpoint_dir, f"meta_{step:06d}.json")
+#     with open(meta_path, "r", encoding="utf-8") as f:
+#         meta_data = json.load(f)
+#     return model_data, optimizer_data, meta_data
+
+
+def load_checkpoint(checkpoint_dir, step, device, load_optimizer=False):
     model_path = os.path.join(checkpoint_dir, f"model_{step:06d}.pt")
+    optimizer_path = os.path.join(checkpoint_dir, f"optim_{step:06d}.pt")
+    meta_path = os.path.join(checkpoint_dir, f"meta_{step:06d}.json")
+
     dev_str = str(device)
     if "xla" in dev_str:
         # Checkpoint was written from XLA. Load tensors onto CPU first,
@@ -66,16 +94,16 @@ def load_checkpoint(checkpoint_dir, step, device, load_optimizer=False):
 
     # Load the model state
     model_data = torch.load(model_path, map_location=map_location)
-    # Load the optimizer state if requested
-    optimizer_data = None
 
-    if load_optimizer:
-        optimizer_path = os.path.join(checkpoint_dir, f"optim_{step:06d}.pt")
-        optimizer_data = torch.load(optimizer_path, map_location=device)
+    # Load the optimizer state if requested and available
+    optimizer_data = None
+    if load_optimizer and os.path.isfile(optimizer_path):
+        optimizer_data = torch.load(optimizer_path, map_location=map_location)
+
     # Load the metadata
-    meta_path = os.path.join(checkpoint_dir, f"meta_{step:06d}.json")
     with open(meta_path, "r", encoding="utf-8") as f:
         meta_data = json.load(f)
+
     return model_data, optimizer_data, meta_data
 
 
