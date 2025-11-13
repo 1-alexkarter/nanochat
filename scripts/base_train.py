@@ -363,25 +363,34 @@ for step in range(num_iterations + 1):
     # once in a while: sample from the model (only on master process)
     # use the original uncompiled model because the inputs keep changing shape
     if master_process and (last_step or (step > 0 and step % sample_every == 0)):
-        model.eval()
-        prompts = [
-            "The capital of France is",
-            "The chemical symbol of gold is",
-            "If yesterday was Friday, then tomorrow will be",
-            "The opposite of hot is",
-            "The planets of the solar system are:",
-            "My favorite color is",
-            "If 5*x + 3 = 13, then x is",
-        ]
-        engine = Engine(orig_model, tokenizer)  # use orig_model to avoid recompilation
-        for prompt in prompts:
-            tokens = tokenizer(prompt, prepend="<|bos|>")
-            with autocast_ctx:
-                sample, _ = engine.generate_batch(
-                    tokens, num_samples=1, max_tokens=16, temperature=0
-                )
-            print0(tokenizer.decode(sample[0]))
-        model.train()
+        if device_type == "xla":
+            # Engine.generate uses torch.Generator(device=...), which does not support XLA.
+            # Sampling is just for human inspection; we can skip it on TPU.
+            print0(
+                "device_type=xla: skipping sampling (Engine.generate uses a CPU/GPU-only torch.Generator)"
+            )
+        else:
+            model.eval()
+            prompts = [
+                "The capital of France is",
+                "The chemical symbol of gold is",
+                "If yesterday was Friday, then tomorrow will be",
+                "The opposite of hot is",
+                "The planets of the solar system are:",
+                "My favorite color is",
+                "If 5*x + 3 = 13, then x is",
+            ]
+            engine = Engine(
+                orig_model, tokenizer
+            )  # use orig_model to avoid recompilation
+            for prompt in prompts:
+                tokens = tokenizer(prompt, prepend="<|bos|>")
+                with autocast_ctx:
+                    sample, _ = engine.generate_batch(
+                        tokens, num_samples=1, max_tokens=16, temperature=0
+                    )
+                print0(tokenizer.decode(sample[0]))
+            model.train()
 
     # save checkpoint at the end of the run (only on master process)
     if master_process and last_step:
