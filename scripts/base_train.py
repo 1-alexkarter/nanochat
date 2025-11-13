@@ -128,7 +128,7 @@ elif device_type == "xla":
     from contextlib import nullcontext as _nullcontext  # shadow just to be explicit
 
     autocast_ctx = _nullcontext()
-    synchronize = lambda: xm.sync()
+    synchronize = xm.mark_step
     get_max_memory = (
         lambda: 0
     )  # nothing convenient like torch.cuda.max_memory_allocated
