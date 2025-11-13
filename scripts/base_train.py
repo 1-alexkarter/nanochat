@@ -14,6 +14,10 @@ python -m scripts.base_train --depth=4 --max_seq_len=512 --device_batch_size=1 -
 import os
 
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+# Disable torch.compile / TorchDynamo / Inductor globally.
+# This avoids Inductor trying to compile Muon/AdamW on XLA devices.
+os.environ["TORCH_COMPILE_DISABLE"] = "1"
+
 import time
 from contextlib import nullcontext
 
@@ -124,8 +128,11 @@ elif device_type == "xla":
     from contextlib import nullcontext as _nullcontext  # shadow just to be explicit
 
     autocast_ctx = _nullcontext()
-    synchronize = xm.mark_step  # advances XLA execution & acts as a sync point
-    get_max_memory = lambda: 0  # not easily available; just stub it out
+    synchronize = lambda: xm.sync()
+    get_max_memory = (
+        lambda: 0
+    )  # nothing convenient like torch.cuda.max_memory_allocated
+
 else:
     # CPU / MPS: no special sync/autocast
     from contextlib import nullcontext as _nullcontext
