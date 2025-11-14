@@ -526,24 +526,38 @@ def _mp_train_fn(index: int):
 
 
 if __name__ == "__main__":
+    # Multi-core TPU via PJRT
     if os.environ.get("PJRT_DEVICE", "").upper() == "TPU":
-        import torch_xla
+        # Use xmp.spawn directly, one process per TPU core
+        import torch_xla.distributed.xla_multiprocessing as xmp
 
-        # One process per TPU chip, all managed by PJRT.
-        torch_xla.launch(_mp_train_fn, args=())
+        nprocs = int(os.environ.get("TPU_NUM_DEVICES", "8"))
+        xmp.spawn(_mp_train_fn, args=(), nprocs=nprocs)
 
     else:
+        # Single-process path (GPU/CPU/MPS)
         _mp_train_fn(0)
 
-    # # device_type may have been overridden from CLI via configurator
-    # device_type = autodetect_device_type() if device_type == "" else device_type
+#    torch_xla.launch version
+# if __name__ == "__main__":
+#     if os.environ.get("PJRT_DEVICE", "").upper() == "TPU":
+#         import torch_xla
 
-    # if device_type == "xla" and xmp is not None:
-    #     # Use all 8 TPU cores on v6e-8
-    #     xmp.spawn(_mp_train_fn, args=(), nprocs=8)
-    # else:
-    #     # Normal (single-process or torchrun-DDP) path
-    #     _mp_train_fn(index=0)
+#         # One process per TPU chip, all managed by PJRT.
+#         torch_xla.launch(_mp_train_fn, args=())
+
+#     else:
+#         _mp_train_fn(0)
+
+# # device_type may have been overridden from CLI via configurator
+# device_type = autodetect_device_type() if device_type == "" else device_type
+
+# if device_type == "xla" and xmp is not None:
+#     # Use all 8 TPU cores on v6e-8
+#     xmp.spawn(_mp_train_fn, args=(), nprocs=8)
+# else:
+#     # Normal (single-process or torchrun-DDP) path
+#     _mp_train_fn(index=0)
 
 # OLD VERSION
 # # Compute init
