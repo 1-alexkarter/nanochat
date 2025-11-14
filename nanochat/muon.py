@@ -3,6 +3,7 @@ Muon optimizer from Keller et al.
 Also a lot of borrowing of ideas from modded-nanogpt.
 """
 
+import os
 import torch
 from torch import Tensor
 import torch.distributed as dist
@@ -225,11 +226,8 @@ class DistMuon(torch.optim.Optimizer):
         torch.futures.collect_all(all_gather_futures).wait()
 
 
-def _dist_world_size_safe() -> int:
-    """Return torch.distributed world_size, or 1 if not initialized."""
-    if not dist.is_available():
-        return 1
-    if not dist.is_initialized():
+def _world_size_safe() -> int:
+    if not dist.is_available() or not dist.is_initialized():
         return 1
     try:
         return dist.get_world_size()
@@ -237,35 +235,75 @@ def _dist_world_size_safe() -> int:
         return 1
 
 
-def MuonFactory(
-    params,
-    lr: float = 0.02,
-    momentum: float = 0.95,
-    nesterov: bool = True,
-    ns_steps: int = 5,
-):
+def MuonFactory(params, lr=0.02, momentum=0.95, nesterov=True, ns_steps=5):
     """
-    On normal torch.distributed (GPU etc.), use DistMuon when world_size > 1.
-    On XLA/TPU (no process group), fall back to plain Muon and let XLA
-    handle replication and gradient syncing via xm.optimizer_step.
-    """
-    world_size = _dist_world_size_safe()
+    Chooses between Muon and DistMuon.
 
-    if world_size > 1:
-        # true c10d distributed training
+    - On PJRT/TPU (PJRT_DEVICE=TPU): always use local Muon, let XLA handle
+      cross-replica gradient sync.
+    - On GPU/CPU:
+        * if torch.distributed is not initialized or world_size == 1 -> Muon
+        * if world_size > 1 -> DistMuon
+    """
+    # 1) TPU / PJRT path: NEVER use DistMuon, c10d is not our backend here
+    if os.environ.get("PJRT_DEVICE", "").upper() == "TPU":
+        return Muon(
+            params, lr=lr, momentum=momentum, nesterov=nesterov, ns_steps=ns_steps
+        )
+
+    # 2) GPU/CPU: only go DistMuon if real DDP is active
+    ws = _world_size_safe()
+    if ws > 1:
         return DistMuon(
-            params,
-            lr=lr,
-            momentum=momentum,
-            nesterov=nesterov,
-            ns_steps=ns_steps,
+            params, lr=lr, momentum=momentum, nesterov=nesterov, ns_steps=ns_steps
         )
     else:
-        # single-process optimizer (also what we want on XLA multi-core)
         return Muon(
-            params,
-            lr=lr,
-            momentum=momentum,
-            nesterov=nesterov,
-            ns_steps=ns_steps,
+            params, lr=lr, momentum=momentum, nesterov=nesterov, ns_steps=ns_steps
         )
+
+
+# def _dist_world_size_safe() -> int:
+#     """Return torch.distributed world_size, or 1 if not initialized."""
+#     if not dist.is_available():
+#         return 1
+#     if not dist.is_initialized():
+#         return 1
+#     try:
+#         return dist.get_world_size()
+#     except Exception:
+#         return 1
+
+
+# def MuonFactory(
+#     params,
+#     lr: float = 0.02,
+#     momentum: float = 0.95,
+#     nesterov: bool = True,
+#     ns_steps: int = 5,
+# ):
+#     """
+#     On normal torch.distributed (GPU etc.), use DistMuon when world_size > 1.
+#     On XLA/TPU (no process group), fall back to plain Muon and let XLA
+#     handle replication and gradient syncing via xm.optimizer_step.
+#     """
+#     world_size = _dist_world_size_safe()
+
+#     if world_size > 1:
+#         # true c10d distributed training
+#         return DistMuon(
+#             params,
+#             lr=lr,
+#             momentum=momentum,
+#             nesterov=nesterov,
+#             ns_steps=ns_steps,
+#         )
+#     else:
+#         # single-process optimizer (also what we want on XLA multi-core)
+#         return Muon(
+#             params,
+#             lr=lr,
+#             momentum=momentum,
+#             nesterov=nesterov,
+#             ns_steps=ns_steps,
+#         )
