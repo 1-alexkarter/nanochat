@@ -235,32 +235,20 @@ def _world_size_safe() -> int:
         return 1
 
 
-def MuonFactory(params, lr=0.02, momentum=0.95, nesterov=True, ns_steps=5):
+def MuonFactory(params, **kwargs):
     """
-    Chooses between Muon and DistMuon.
-
-    - On PJRT/TPU (PJRT_DEVICE=TPU): always use local Muon, let XLA handle
-      cross-replica gradient sync.
-    - On GPU/CPU:
-        * if torch.distributed is not initialized or world_size == 1 -> Muon
-        * if world_size > 1 -> DistMuon
+    On GPUs with torch.distributed initialized -> use DistMuon.
+    On TPU (PJRT_DEVICE=TPU) or no process group -> use plain Muon and
+    let xm.optimizer_step handle gradient sync.
     """
-    # 1) TPU / PJRT path: NEVER use DistMuon, c10d is not our backend here
-    if os.environ.get("PJRT_DEVICE", "").upper() == "TPU":
-        return Muon(
-            params, lr=lr, momentum=momentum, nesterov=nesterov, ns_steps=ns_steps
-        )
-
-    # 2) GPU/CPU: only go DistMuon if real DDP is active
-    ws = _world_size_safe()
-    if ws > 1:
-        return DistMuon(
-            params, lr=lr, momentum=momentum, nesterov=nesterov, ns_steps=ns_steps
-        )
+    if (
+        os.environ.get("PJRT_DEVICE", "").upper() != "TPU"
+        and dist.is_available()
+        and dist.is_initialized()
+    ):
+        return DistMuon(params, **kwargs)
     else:
-        return Muon(
-            params, lr=lr, momentum=momentum, nesterov=nesterov, ns_steps=ns_steps
-        )
+        return Muon(params, **kwargs)
 
 
 # def _dist_world_size_safe() -> int:

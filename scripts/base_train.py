@@ -24,14 +24,15 @@ from contextlib import nullcontext
 import wandb
 import torch
 
-# Optional TPU support (torch-xla). On pure GPU setups this will just set xm = None.
 # Optional TPU support (torch-xla). On pure GPU setups this will just set xm/xmp = None.
 try:
     import torch_xla.core.xla_model as xm  # type: ignore
     import torch_xla.distributed.xla_multiprocessing as xmp  # type: ignore
+    from torch_xla import runtime as xr  # <--- add this
 except ImportError:
     xm = None
     xmp = None
+    xr = None
 
 
 from nanochat.gpt import GPT, GPTConfig
@@ -120,17 +121,21 @@ def _mp_train_fn(index: int):
     if device_type == "xla":
         # Multi-process XLA: each process gets its own TPU core.
         assert xm is not None, "torch_xla is required for device_type='xla'"
-        # World size and rank come from XLA's view of the mesh
-        ddp = False
-        ddp_rank = 0
-        ddp_local_rank = 0
-        ddp_world_size = 1
-        device = xm.xla_device()
+        assert xr is not None, "torch_xla.runtime is required for PJRT"
 
-        # Make the rest of nanochat (print0, dataloader, etc.) happy:
+        # World size and rank come from XLA's view of the mesh
+
+        device = xm.xla_device()
+        ddp_world_size = xr.global_runtime_device_count()
+        ddp_rank = xr.global_ordinal()
+        ddp_local_rank = ddp_rank  # single host, 1 process per device
+        ddp = ddp_world_size > 1
+
+        # Make the rest of nanochat infra happy (print0, dataloader, etc.)
         os.environ["RANK"] = str(ddp_rank)
         os.environ["LOCAL_RANK"] = str(ddp_local_rank)
         os.environ["WORLD_SIZE"] = str(ddp_world_size)
+
     else:
         # Original CUDA/MPS/CPU path, using nanochat.common.compute_init
         ddp, ddp_rank, ddp_local_rank, ddp_world_size, device = compute_init(
@@ -522,10 +527,11 @@ def _mp_train_fn(index: int):
 
 if __name__ == "__main__":
     if os.environ.get("PJRT_DEVICE", "").upper() == "TPU":
-        import torch_xla.distributed.xla_multiprocessing as xmp
+        import torch_xla
 
-        # nprocs=None (or omitted) => "use all TPU devices"
-        xmp.spawn(_mp_train_fn, args=())  # <-- no nprocs=8 here
+        # One process per TPU chip, all managed by PJRT.
+        torch_xla.launch(_mp_train_fn, args=())
+
     else:
         _mp_train_fn(0)
 
