@@ -532,7 +532,7 @@ if __name__ == "__main__":
         import torch_xla.distributed.xla_multiprocessing as xmp
 
         nprocs = int(os.environ.get("TPU_NUM_DEVICES", "8"))
-        xmp.spawn(_mp_train_fn, args=(), nprocs=nprocs)
+        xmp.spawn(_mp_train_fn, args=())
 
     else:
         # Single-process path (GPU/CPU/MPS)
