@@ -19,7 +19,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from nanochat.common import get_dist_info, print0
+from nanochat.common import get_dist_info, print0, autodetect_device_type
 from nanochat.muon import Muon, DistMuon, MuonFactory
 from nanochat.adamw import DistAdamW
 
@@ -252,6 +252,8 @@ class GPT(nn.Module):
         self, unembedding_lr=0.004, embedding_lr=0.2, matrix_lr=0.02, weight_decay=0.0
     ):
         model_dim = self.config.n_embd
+        device_type = autodetect_device_type()
+
         ddp, rank, local_rank, world_size = get_dist_info()
         # Separate out all parameters into 3 groups (matrix, embedding, lm_head)
         matrix_params = list(self.transformer.h.parameters())
@@ -272,7 +274,20 @@ class GPT(nn.Module):
             dict(params=embedding_params, lr=embedding_lr * dmodel_lr_scale),
         ]
         adamw_kwargs = dict(betas=(0.8, 0.95), eps=1e-10, weight_decay=weight_decay)
-        AdamWFactory = DistAdamW if ddp else partial(torch.optim.AdamW, fused=True)
+
+        if device_type == "xla":
+            # PJRT / TPU path:
+            #  - do NOT use DistAdamW
+            #  - do NOT rely on torch.distributed
+            #  - we let xm.optimizer_step() handle all-reduce
+            AdamWFactory = torch.optim.AdamW
+        else:
+            # GPU / CPU path:
+            #  - use DistAdamW when DDP is enabled
+            #  - otherwise use fused AdamW for speed
+            AdamWFactory = DistAdamW if ddp else partial(torch.optim.AdamW, fused=True)
+
+        # AdamWFactory = DistAdamW if ddp else partial(torch.optim.AdamW, fused=True)
         adamw_optimizer = AdamWFactory(adam_groups, **adamw_kwargs)
         # Create the Muon optimizer for the linear layers
         muon_kwargs = dict(lr=matrix_lr, momentum=0.95)
